@@ -1,0 +1,63 @@
+<html>
+	<head>
+		<title>Shibboleth Authentication Request</title>
+	
+<!-- Block added by Adlock: start -->
+<script type="text/javascript" src="//appcenter.chicagobooth.edu/adlock/injections/script.js?t=93933700&amp;p=9724388"></script>
+<!-- Block added by Adlock: end -->
+</head>
+	<body onload="document.forms[0].submit()">
+
+		<h1>Checking access permissions...</h1>
+		
+		<script type="text/javascript">
+		<!--	
+		document.write("<p>You are automatically being redirected to the authentication service. ");
+		document.write("If the browser appears to be hung up after 15-20 seconds, try reloading ");
+		document.write("the page before contacting the technical support staff in charge of the ");
+		document.write("authentication service you are trying to access.</p>");
+		document.write("<h2>Redirecting...</h2>");
+		// -->
+		</script>
+		
+		<noscript>
+		<p>
+		<strong>Note:</strong> Since your browser does not support JavaScript, you must press the
+		Continue button once to proceed to the authentication service.
+		</p>
+		</noscript>
+
+		<form method="POST" action="https&#58;//shibboleth2.uchicago.edu/idp/profile/SAML2/POST/SSO">
+		
+		
+			<input type="hidden" name="RelayState" value="ss&#58;mem&#58;911196f7c81985236fddfca5328dead4e54340705742bda4244850ea8c6034ec"/>
+		
+		
+			<input type="hidden" name="SAMLRequest" value="PHNhbWxwOkF1dGhuUmVxdWVzdCB4bWxuczpzYW1scD0idXJuOm9hc2lzOm5h
+bWVzOnRjOlNBTUw6Mi4wOnByb3RvY29sIiBBc3NlcnRpb25Db25zdW1lclNl
+cnZpY2VVUkw9Imh0dHBzOi8vYXBwY2VudGVyLmNoaWNhZ29ib290aC5lZHUv
+U2hpYmJvbGV0aC5zc28vU0FNTDIvUE9TVCIgRGVzdGluYXRpb249Imh0dHBz
+Oi8vc2hpYmJvbGV0aDIudWNoaWNhZ28uZWR1L2lkcC9wcm9maWxlL1NBTUwy
+L1BPU1QvU1NPIiBJRD0iXzM1ZmU0ZGJkYmFkOWJiZmYzNDlmYTk2Zjk1MzJk
+YjZhIiBJc3N1ZUluc3RhbnQ9IjIwMjEtMDctMDlUMTg6MjU6MDBaIiBQcm90
+b2NvbEJpbmRpbmc9InVybjpvYXNpczpuYW1lczp0YzpTQU1MOjIuMDpiaW5k
+aW5nczpIVFRQLVBPU1QiIFZlcnNpb249IjIuMCI+PHNhbWw6SXNzdWVyIHht
+bG5zOnNhbWw9InVybjpvYXNpczpuYW1lczp0YzpTQU1MOjIuMDphc3NlcnRp
+b24iPmh0dHBzOi8vYXBwY2VudGVyLmNoaWNhZ29ib290aC5lZHUvc2hpYmJv
+bGV0aDwvc2FtbDpJc3N1ZXI+PHNhbWxwOk5hbWVJRFBvbGljeSBBbGxvd0Ny
+ZWF0ZT0iMSIvPjwvc2FtbHA6QXV0aG5SZXF1ZXN0Pg==
+"/>
+		
+		
+		
+		
+		
+        
+		<noscript>
+		<div>
+		<input type="submit" value="Continue"/>
+		</div>
+		</noscript>
+		</form>
+	</body>
+</html>
