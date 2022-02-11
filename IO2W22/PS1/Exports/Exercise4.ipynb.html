@@ -1,0 +1,342 @@
+<html>
+<head>
+<title>Exercise4.ipynb</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #727072; font-style: italic;}
+.s1 { color: #ff6188;}
+.s2 { color: #fcfcfa;}
+.s3 { color: #939293;}
+.s4 { color: #ab9df2;}
+.s5 { color: #ffd866;}
+</style>
+</head>
+<body bgcolor="#2d2a2e">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+Exercise4.ipynb</font>
+</center></td></tr></table>
+<pre><span class="s0">#%% 
+</span><span class="s1">import </span><span class="s2">numpy </span><span class="s1">as </span><span class="s2">np</span>
+<span class="s1">import </span><span class="s2">pandas </span><span class="s1">as </span><span class="s2">pd</span>
+<span class="s1">import </span><span class="s2">statsmodels</span><span class="s3">.</span><span class="s2">api </span><span class="s1">as </span><span class="s2">sm</span>
+<span class="s1">import </span><span class="s2">pyblp </span><span class="s1">as </span><span class="s2">blp</span>
+<span class="s1">import </span><span class="s2">torch</span>
+<span class="s1">from </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">autograd </span><span class="s1">import </span><span class="s2">Variable</span>
+<span class="s1">import </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">optim </span><span class="s1">as </span><span class="s2">optim</span>
+<span class="s1">from </span><span class="s2">linearmodels</span><span class="s3">.</span><span class="s2">iv </span><span class="s1">import </span><span class="s2">IV2SLS</span>
+<span class="s1">from </span><span class="s2">HomogenousDemandEstimation </span><span class="s1">import </span><span class="s2">HomDemEst</span>
+<span class="s1">from </span><span class="s2">GaussHermiteQuadrature </span><span class="s1">import </span><span class="s2">GaussHermiteQuadrature</span>
+
+<span class="s2">blp</span><span class="s3">.</span><span class="s2">options</span><span class="s3">.</span><span class="s2">digits </span><span class="s1">= </span><span class="s4">2</span>
+<span class="s2">blp</span><span class="s3">.</span><span class="s2">options</span><span class="s3">.</span><span class="s2">verbose </span><span class="s1">= False</span>
+<span class="s2">nax </span><span class="s1">= </span><span class="s2">np</span><span class="s3">.</span><span class="s2">newaxis</span>
+<span class="s0">#%% md 
+</span><span class="s2">The file `ps1_ex4.csv` contains aggregate data on $T=600$ markets in which $J=6$ products compete between each other together with an outside good $j=0$. The utility of consumer $i$ is given by: 
+ 
+$$ 
+\begin{aligned} 
+&amp;u_{i j t} \; = \; \widetilde{\mathbf{x}}_{j t}^{\prime} \boldsymbol{\beta} + \xi_{j t}+\widetilde{\mathbf{x}}_{j t}^{\prime} \boldsymbol{\Gamma} \boldsymbol{v}_{i}+\epsilon_{i j t} \quad j=1, \ldots, 6 \\ 
+&amp;u_{i 0 t} \; = \; \epsilon_{i 0 t} 
+\end{aligned} 
+$$ 
+ 
+where $x_{j t}$ is a vector of observed product characteristics including the price, $\xi_{j t}$ is an unobserved product characteristic, $v_{i}$ is a vector of unobserved taste shocks for the product characteristics and $\epsilon_{i j t}$ is i.i.d T1EV $(0,1)$. Our goal is to to estimate demand parameters $(\boldsymbol{\beta}, \boldsymbol{\Gamma})$ using the BLP algorithm. As you can see from the data there are only two characteristics $\widetilde{\mathbf{x}}_{j t}=\begin{pmatrix} p_{j t} &amp; x_{j t} \end{pmatrix}$, namely prices and an observed measure of product quality. Moreover, there are several valid instruments $\mathbf{z}_{j t}$ that you will use to construct moments to estimate $(\boldsymbol{\beta}, \boldsymbol{\Gamma})$. Finally, you can assume that $\Gamma$ is lower triangular e.g., 
+ 
+$$ 
+\boldsymbol{\Gamma} \; = \; \begin{pmatrix} 
+\gamma_{11} &amp; 0 \\ 
+\gamma_{21} &amp; \gamma_{22} 
+\end{pmatrix} 
+$$ 
+ 
+such that $\boldsymbol{\Gamma} \boldsymbol{\Gamma}^{\prime}=\boldsymbol{\Omega}$ is a positive definite matrix and that $v_{i}$ is a 2 dimensional vector of i.i.d random taste shocks distributed $\mathcal{N}\left(\mathbf{0}, \mathbf{I}_2 \right)$. 
+</span><span class="s0">#%% 
+# Load the dataset.</span>
+<span class="s2">data_ex4 </span><span class="s1">= </span><span class="s2">pd</span><span class="s3">.</span><span class="s2">read_csv</span><span class="s3">(</span><span class="s5">'ps1_ex4.csv'</span><span class="s3">)</span>
+<span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'const'</span><span class="s3">] </span><span class="s1">= </span><span class="s4">1.0     </span><span class="s0"># Add a constant term</span>
+
+<span class="s2">num_prod </span><span class="s1">= </span><span class="s2">data_ex4</span><span class="s3">.</span><span class="s2">choice</span><span class="s3">.</span><span class="s2">nunique</span><span class="s3">()   </span><span class="s0"># Number of products to choose from.</span>
+<span class="s2">num_T </span><span class="s1">= </span><span class="s2">data_ex4</span><span class="s3">.</span><span class="s2">market</span><span class="s3">.</span><span class="s2">nunique</span><span class="s3">()</span>
+
+<span class="s0"># Create outside option shares and merge into dataset.</span>
+<span class="s2">share_total </span><span class="s1">= </span><span class="s2">data_ex4</span><span class="s3">.</span><span class="s2">groupby</span><span class="s3">([</span><span class="s5">'market'</span><span class="s3">])[</span><span class="s5">'shares'</span><span class="s3">].</span><span class="s2">sum</span><span class="s3">().</span><span class="s2">reset_index</span><span class="s3">()</span>
+<span class="s2">share_total</span><span class="s3">.</span><span class="s2">rename</span><span class="s3">(</span><span class="s2">columns</span><span class="s1">=</span><span class="s3">{</span><span class="s5">'shares'</span><span class="s1">: </span><span class="s5">'s0'</span><span class="s3">}, </span><span class="s2">inplace</span><span class="s1">=True</span><span class="s3">)</span>
+<span class="s2">share_total</span><span class="s3">[</span><span class="s5">'s0'</span><span class="s3">] </span><span class="s1">= </span><span class="s4">1 </span><span class="s1">- </span><span class="s2">share_total</span><span class="s3">[</span><span class="s5">'s0'</span><span class="s3">]</span>
+<span class="s2">data_ex4 </span><span class="s1">= </span><span class="s2">pd</span><span class="s3">.</span><span class="s2">merge</span><span class="s3">(</span><span class="s2">data_ex4</span><span class="s3">, </span><span class="s2">share_total</span><span class="s3">, </span><span class="s2">on</span><span class="s1">=</span><span class="s5">'market'</span><span class="s3">)</span>
+
+<span class="s0"># Create natural log of share ratios</span>
+<span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'sr'</span><span class="s3">] </span><span class="s1">= </span><span class="s2">np</span><span class="s3">.</span><span class="s2">log</span><span class="s3">(</span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'shares'</span><span class="s3">]</span><span class="s1">/</span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'s0'</span><span class="s3">])</span>
+
+<span class="s0"># Create constant term</span>
+<span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'const'</span><span class="s3">] </span><span class="s1">= </span><span class="s4">1</span>
+<span class="s0">#%% md 
+</span><span class="s2">The market shares can be expressed as a function of individual characteristics as shown below. 
+ 
+$$ 
+\begin{aligned} 
+s_{j} \; &amp; \simeq \; \mathbb{E}[\operatorname{Pr}(i \text { Chooses } j)] \\ 
+&amp;= \; \int_{\mathbf{v}_{i}} \; \operatorname{Pr}(i \text { Chooses } j) 
+\; \text{d}\,  F\left(\mathbf{v}_{i}\right) \\ 
+&amp;= \; \int_{\mathbf{v}_{i}} \; \frac{ \exp \left(  \widetilde{\mathbf{x}}_{j t}^{\prime} \boldsymbol{\beta} + \xi_{j t}+\widetilde{\mathbf{x}}_{j t}^{\prime} \boldsymbol{\Gamma} \boldsymbol{v}_{i} \right) }{1 + \sum_{k \in \mathcal{J}_{t}} \exp \left(  \widetilde{\mathbf{x}}_{k t}^{\prime} \boldsymbol{\beta} + \xi_{k t}+\widetilde{\mathbf{x}}_{k t}^{\prime} \boldsymbol{\Gamma} \boldsymbol{v}_{i} \right)} \text{d}\,  F\left(\mathbf{v}_{i}\right) 
+\end{aligned} 
+$$ 
+ 
+However, due to the heterogeneity in individual preferences, we do not have a neat solution to back out the preference parameters from using logarithms of share-ratios. 
+</span><span class="s0">#%% 
+# Obtain initial guess for β using the homogenous model.</span>
+
+<span class="s2">est </span><span class="s1">= </span><span class="s2">HomDemEst</span><span class="s3">(</span><span class="s2">data_dict</span><span class="s1">=</span><span class="s3">{</span>
+    <span class="s5">'Data'</span><span class="s1">: </span><span class="s2">data_ex4</span><span class="s3">,</span>
+    <span class="s5">'Choice Column'</span><span class="s1">: </span><span class="s5">'choice'</span><span class="s3">,</span>
+    <span class="s5">'Market Column'</span><span class="s1">: </span><span class="s5">'market'</span><span class="s3">,</span>
+    <span class="s5">'Log Share Ratio Column'</span><span class="s1">: </span><span class="s5">'sr'</span><span class="s3">,</span>
+    <span class="s5">'Endogenous Columns'</span><span class="s1">: </span><span class="s3">[</span><span class="s5">'p'</span><span class="s3">],</span>
+    <span class="s5">'Exogenous Columns'</span><span class="s1">: </span><span class="s3">[</span><span class="s5">'x'</span><span class="s3">],</span>
+    <span class="s5">'Instrument Columns'</span><span class="s1">: </span><span class="s3">[</span><span class="s5">'z1'</span><span class="s3">, </span><span class="s5">'z2'</span><span class="s3">, </span><span class="s5">'z3'</span><span class="s3">, </span><span class="s5">'z4'</span><span class="s3">, </span><span class="s5">'z5'</span><span class="s3">, </span><span class="s5">'z6'</span><span class="s3">],</span>
+    <span class="s5">'Add Constant'</span><span class="s1">: True</span>
+<span class="s3">})</span>
+
+<span class="s2">beta_guess </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">tensor</span><span class="s3">(</span><span class="s2">np</span><span class="s3">.</span><span class="s2">array</span><span class="s3">(</span><span class="s2">est</span><span class="s3">.</span><span class="s2">one_step_gmm</span><span class="s3">().</span><span class="s2">detach</span><span class="s3">()), </span><span class="s2">dtype</span><span class="s1">=</span><span class="s2">torch</span><span class="s3">.</span><span class="s2">double</span><span class="s3">)</span>
+<span class="s2">beta_guess</span>
+<span class="s0">#%% 
+# Set parameters for the optimization procedure.</span>
+<span class="s2">gamma </span><span class="s1">= </span><span class="s2">Variable</span><span class="s3">(</span><span class="s4">3 </span><span class="s1">* </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">rand</span><span class="s3">((</span><span class="s4">2</span><span class="s3">,</span><span class="s4">2</span><span class="s3">), </span><span class="s2">dtype</span><span class="s1">=</span><span class="s2">torch</span><span class="s3">.</span><span class="s2">double</span><span class="s3">), </span><span class="s2">requires_grad</span><span class="s1">=True</span><span class="s3">)</span>
+<span class="s2">beta </span><span class="s1">= </span><span class="s2">Variable</span><span class="s3">(</span><span class="s2">beta_guess</span><span class="s3">, </span><span class="s2">requires_grad</span><span class="s1">=False</span><span class="s3">)</span>
+
+<span class="s2">print</span><span class="s3">(</span><span class="s2">gamma</span><span class="s3">)</span>
+<span class="s0">#%% 
+</span><span class="s2">ghq </span><span class="s1">= </span><span class="s2">GaussHermiteQuadrature</span><span class="s3">(</span><span class="s4">2</span><span class="s3">, </span><span class="s4">9</span><span class="s3">)</span>
+<span class="s2">ghq_node_mat </span><span class="s1">= </span><span class="s2">ghq</span><span class="s3">.</span><span class="s2">X</span><span class="s3">.</span><span class="s2">T</span>
+<span class="s0">#%% 
+# Save data as Pytorch tensors.</span>
+<span class="s2">shares </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">tensor</span><span class="s3">(</span><span class="s2">np</span><span class="s3">.</span><span class="s2">array</span><span class="s3">(</span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'shares'</span><span class="s3">]),</span>
+                      <span class="s2">dtype</span><span class="s1">=</span><span class="s2">torch</span><span class="s3">.</span><span class="s2">double</span><span class="s3">)</span>
+<span class="s2">covars </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">tensor</span><span class="s3">(</span><span class="s2">np</span><span class="s3">.</span><span class="s2">array</span><span class="s3">(</span><span class="s2">data_ex4</span><span class="s3">[[</span><span class="s5">'const'</span><span class="s3">, </span><span class="s5">'x'</span><span class="s3">, </span><span class="s5">'p'</span><span class="s3">]]),</span>
+                      <span class="s2">dtype</span><span class="s1">=</span><span class="s2">torch</span><span class="s3">.</span><span class="s2">double</span><span class="s3">)</span>
+<span class="s2">num_covar </span><span class="s1">= </span><span class="s2">covars</span><span class="s3">.</span><span class="s2">size</span><span class="s3">()[</span><span class="s4">1</span><span class="s3">]</span>
+<span class="s2">instruments </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">tensor</span><span class="s3">(</span><span class="s2">np</span><span class="s3">.</span><span class="s2">array</span><span class="s3">(</span><span class="s2">data_ex4</span><span class="s3">[[</span><span class="s5">'const'</span><span class="s3">, </span><span class="s5">'x'</span><span class="s3">, </span><span class="s5">'z1'</span><span class="s3">, </span><span class="s5">'z2'</span><span class="s3">,</span>
+                                              <span class="s5">'z3'</span><span class="s3">, </span><span class="s5">'z4'</span><span class="s3">, </span><span class="s5">'z5'</span><span class="s3">, </span><span class="s5">'z6'</span><span class="s3">]]),</span>
+                                      <span class="s2">dtype</span><span class="s1">=</span><span class="s2">torch</span><span class="s3">.</span><span class="s2">double</span><span class="s3">)</span>
+<span class="s2">x_mat </span><span class="s1">= </span><span class="s2">covars</span><span class="s3">.</span><span class="s2">reshape</span><span class="s3">((</span><span class="s2">num_T</span><span class="s3">, </span><span class="s2">num_prod</span><span class="s3">, </span><span class="s2">num_covar</span><span class="s3">))</span>
+<span class="s2">s_mat </span><span class="s1">= </span><span class="s2">shares</span><span class="s3">.</span><span class="s2">reshape</span><span class="s3">((</span><span class="s2">num_T</span><span class="s3">, </span><span class="s2">num_prod</span><span class="s3">))</span>
+
+<span class="s2">x_random_mat </span><span class="s1">= </span><span class="s2">x_mat</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">:</span><span class="s3">, </span><span class="s4">1</span><span class="s1">:-</span><span class="s4">1</span><span class="s3">]</span>
+<span class="s0">#%% md 
+</span><span class="s2">### Part A - Nested Fixed Point Approach 
+ 
+We solve for the model parameters $\boldsymbol{\beta}$ and $\Gamm$ using the NFXP algorithm outlined in BLP (1995) and Nevo (2001). 
+ 
+</span><span class="s0">#%% 
+</span><span class="s1">def </span><span class="s2">mean_utility</span><span class="s3">(</span><span class="s2">b</span><span class="s3">, </span><span class="s2">xi</span><span class="s3">)</span><span class="s1">:</span>
+
+    <span class="s1">return </span><span class="s2">covars </span><span class="s1">@ </span><span class="s2">b</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">None</span><span class="s3">] </span><span class="s1">+ </span><span class="s2">xi</span>
+
+<span class="s1">def </span><span class="s2">market_share_val</span><span class="s3">(</span><span class="s2">delta</span><span class="s3">, </span><span class="s2">g</span><span class="s3">)</span><span class="s1">:</span>
+
+    <span class="s0"># Evaluate the expression for every market, product and</span>
+    <span class="s0"># Gauss-Hermite node.</span>
+    <span class="s0"># Returns a matrix of size (num_T, num_prod, GHQ_size).</span>
+
+    <span class="s2">numer </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">exp</span><span class="s3">(</span><span class="s2">delta</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">:</span><span class="s3">, </span><span class="s1">None</span><span class="s3">] </span><span class="s1">+ </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">einsum</span><span class="s3">(</span><span class="s5">'tjk,kl,lm -&gt; tjm'</span><span class="s3">, </span><span class="s2">x_random_mat</span><span class="s3">, </span><span class="s2">g</span><span class="s3">, </span><span class="s2">ghq_node_mat</span><span class="s3">))</span>
+    <span class="s2">denom </span><span class="s1">= </span><span class="s4">1 </span><span class="s1">+ </span><span class="s2">numer</span><span class="s3">.</span><span class="s2">sum</span><span class="s3">(</span><span class="s2">axis</span><span class="s1">=</span><span class="s4">1</span><span class="s3">)</span>
+
+    <span class="s0"># Compute the share matrix for every value of unobserved individual characteristics.</span>
+    <span class="s2">share_mat </span><span class="s1">= </span><span class="s2">numer</span><span class="s3">.</span><span class="s2">div</span><span class="s3">(</span><span class="s2">denom</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">None</span><span class="s3">])</span>
+
+    <span class="s0"># Take the expected value of the above matrix using a GH integral</span>
+    <span class="s0"># approximation.</span>
+    <span class="s2">exp_share </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">einsum</span><span class="s3">(</span><span class="s5">'m, tjm -&gt; tj'</span><span class="s3">, </span><span class="s2">ghq</span><span class="s3">.</span><span class="s2">W</span><span class="s3">, </span><span class="s2">share_mat</span><span class="s3">)</span>
+
+    <span class="s1">return </span><span class="s2">exp_share</span>
+
+<span class="s1">def </span><span class="s2">blp_contraction</span><span class="s3">(</span><span class="s2">b</span><span class="s3">, </span><span class="s2">g</span><span class="s3">, </span><span class="s2">res</span><span class="s3">)</span><span class="s1">:</span>
+
+    <span class="s0"># Initial guess for mean utility</span>
+    <span class="s2">delta </span><span class="s1">= </span><span class="s2">mean_utility</span><span class="s3">(</span><span class="s2">b</span><span class="s3">, </span><span class="s2">res</span><span class="s3">).</span><span class="s2">reshape</span><span class="s3">((</span><span class="s2">num_T</span><span class="s3">, </span><span class="s2">num_prod</span><span class="s3">))</span>
+
+    <span class="s2">error</span><span class="s3">, </span><span class="s2">tol </span><span class="s1">= </span><span class="s4">1</span><span class="s3">, </span><span class="s4">1e-12</span>
+
+    <span class="s1">while </span><span class="s2">error </span><span class="s1">&gt; </span><span class="s2">tol</span><span class="s1">:</span>
+
+        <span class="s2">exp_delta_new </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">exp</span><span class="s3">(</span><span class="s2">delta</span><span class="s3">) </span><span class="s1">* </span><span class="s2">s_mat</span><span class="s3">.</span><span class="s2">div</span><span class="s3">(</span><span class="s2">market_share_val</span><span class="s3">(</span><span class="s2">delta</span><span class="s3">, </span><span class="s2">g</span><span class="s3">))</span>
+
+        <span class="s2">delta_new </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">log</span><span class="s3">(</span><span class="s2">exp_delta_new</span><span class="s3">)</span>
+
+        <span class="s2">error </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">linalg</span><span class="s3">.</span><span class="s2">norm</span><span class="s3">(</span><span class="s2">delta_new </span><span class="s1">- </span><span class="s2">delta</span><span class="s3">)</span>
+        <span class="s2">delta </span><span class="s1">= </span><span class="s2">delta_new</span>
+
+        <span class="s1">if </span><span class="s2">error </span><span class="s1">% </span><span class="s4">20 </span><span class="s1">== </span><span class="s4">0</span><span class="s1">:</span>
+            <span class="s2">print</span><span class="s3">(</span><span class="s5">'Inner Loop Error = {}'</span><span class="s3">.</span><span class="s2">format</span><span class="s3">(</span><span class="s2">error</span><span class="s3">))</span>
+
+    <span class="s1">return </span><span class="s2">delta</span>
+<span class="s0">#%% 
+</span><span class="s1">def </span><span class="s2">blp_gmm_loss</span><span class="s3">(</span><span class="s2">b</span><span class="s3">, </span><span class="s2">g</span><span class="s3">)</span><span class="s1">:</span>
+
+    <span class="s2">xi </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">zeros</span><span class="s3">((</span><span class="s2">num_prod </span><span class="s1">* </span><span class="s2">num_T</span><span class="s3">, </span><span class="s4">1</span><span class="s3">), </span><span class="s2">dtype</span><span class="s1">=</span><span class="s2">torch</span><span class="s3">.</span><span class="s2">double</span><span class="s3">, </span><span class="s2">requires_grad</span><span class="s1">=False</span><span class="s3">)</span>
+
+    <span class="s0"># Obtaining the BLP contraction solution for the mean utilities.</span>
+    <span class="s2">delta </span><span class="s1">= </span><span class="s2">blp_contraction</span><span class="s3">(</span><span class="s2">b</span><span class="s3">, </span><span class="s2">g</span><span class="s3">, </span><span class="s2">xi</span><span class="s3">).</span><span class="s2">reshape</span><span class="s3">((</span><span class="s2">num_T </span><span class="s1">* </span><span class="s2">num_prod</span><span class="s3">, </span><span class="s4">1</span><span class="s3">))</span>
+
+    <span class="s0"># Run 2SLS of mean utilities on covariates (including prices).</span>
+    <span class="s2">blp_2sls </span><span class="s1">= </span><span class="s2">IV2SLS</span><span class="s3">(</span><span class="s2">dependent</span><span class="s1">=</span><span class="s2">np</span><span class="s3">.</span><span class="s2">array</span><span class="s3">(</span><span class="s2">delta</span><span class="s3">.</span><span class="s2">detach</span><span class="s3">()),</span>
+                      <span class="s2">exog</span><span class="s1">=</span><span class="s2">data_ex4</span><span class="s3">[[</span><span class="s5">'const'</span><span class="s3">, </span><span class="s5">'x'</span><span class="s3">]],</span>
+                      <span class="s2">endog</span><span class="s1">=</span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'p'</span><span class="s3">],</span>
+                      <span class="s2">instruments</span><span class="s1">=</span><span class="s2">data_ex4</span><span class="s3">[[</span><span class="s5">'z1'</span><span class="s3">, </span><span class="s5">'z2'</span><span class="s3">, </span><span class="s5">'z3'</span><span class="s3">, </span><span class="s5">'z4'</span><span class="s3">, </span><span class="s5">'z5'</span><span class="s3">, </span><span class="s5">'z6'</span><span class="s3">]]).</span><span class="s2">fit</span><span class="s3">()</span>
+
+    <span class="s0"># Use 2SLS coefficients.</span>
+    <span class="s2">b_2sls </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">tensor</span><span class="s3">(</span><span class="s2">np</span><span class="s3">.</span><span class="s2">array</span><span class="s3">(</span><span class="s2">blp_2sls</span><span class="s3">.</span><span class="s2">params</span><span class="s3">))</span>
+
+    <span class="s0"># Derive residuals using 2SLS coefficients.</span>
+    <span class="s2">res </span><span class="s1">= </span><span class="s2">delta </span><span class="s1">- </span><span class="s2">covars </span><span class="s1">@ </span><span class="s2">b_2sls</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">None</span><span class="s3">]</span>
+
+    <span class="s0"># Derive moment conditions required for BLP.</span>
+    <span class="s2">moment_eqns </span><span class="s1">= </span><span class="s2">res </span><span class="s1">* </span><span class="s2">instruments</span>
+    <span class="s2">moments </span><span class="s1">= </span><span class="s2">moment_eqns</span><span class="s3">.</span><span class="s2">mean</span><span class="s3">(</span><span class="s2">axis</span><span class="s1">=</span><span class="s4">0</span><span class="s3">)</span>
+
+    <span class="s2">loss_gmm </span><span class="s1">= </span><span class="s2">moments</span><span class="s3">[</span><span class="s1">None</span><span class="s3">, </span><span class="s1">:</span><span class="s3">] </span><span class="s1">@ </span><span class="s2">weight_matrix </span><span class="s1">@ </span><span class="s2">moments</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">None</span><span class="s3">]</span>
+
+    <span class="s2">print</span><span class="s3">(</span><span class="s5">'beta = {}, gamma = {}, loss = {}'</span><span class="s3">.</span><span class="s2">format</span><span class="s3">(</span><span class="s2">np</span><span class="s3">.</span><span class="s2">array</span><span class="s3">(</span><span class="s2">b_2sls</span><span class="s3">.</span><span class="s2">clone</span><span class="s3">().</span><span class="s2">detach</span><span class="s3">()),</span>
+                                                    <span class="s2">np</span><span class="s3">.</span><span class="s2">array</span><span class="s3">(</span><span class="s2">g</span><span class="s3">.</span><span class="s2">clone</span><span class="s3">().</span><span class="s2">detach</span><span class="s3">()),</span>
+                                                    <span class="s2">loss_gmm</span><span class="s3">.</span><span class="s2">clone</span><span class="s3">().</span><span class="s2">detach</span><span class="s3">())</span>
+          <span class="s3">)</span>
+
+    <span class="s1">return </span><span class="s2">loss_gmm</span><span class="s3">, </span><span class="s2">moment_eqns</span><span class="s3">, </span><span class="s2">b_2sls</span>
+<span class="s0">#%% 
+</span><span class="s2">opt_gmm </span><span class="s1">= </span><span class="s2">optim</span><span class="s3">.</span><span class="s2">Adam</span><span class="s3">([</span><span class="s2">gamma</span><span class="s3">], </span><span class="s2">lr</span><span class="s1">=</span><span class="s4">0.01</span><span class="s3">)</span>
+<span class="s2">weight_matrix </span><span class="s1">= </span><span class="s2">Variable</span><span class="s3">(</span><span class="s2">torch</span><span class="s3">.</span><span class="s2">eye</span><span class="s3">(</span><span class="s2">instruments</span><span class="s3">.</span><span class="s2">shape</span><span class="s3">[</span><span class="s4">1</span><span class="s3">], </span><span class="s2">dtype</span><span class="s1">=</span><span class="s2">torch</span><span class="s3">.</span><span class="s2">double</span><span class="s3">), </span><span class="s2">requires_grad</span><span class="s1">=False</span><span class="s3">)</span>
+
+<span class="s0"># Optimizing over the GMM loss function</span>
+<span class="s1">for </span><span class="s2">epoch </span><span class="s1">in </span><span class="s2">range</span><span class="s3">(</span><span class="s4">500</span><span class="s3">)</span><span class="s1">:</span>
+
+    <span class="s2">opt_gmm</span><span class="s3">.</span><span class="s2">zero_grad</span><span class="s3">()   </span><span class="s0"># Reset gradient inside the optimizer</span>
+
+    <span class="s0"># Compute the objective at the current parameter values.</span>
+    <span class="s2">loss</span><span class="s3">, </span><span class="s2">moment_x</span><span class="s3">, </span><span class="s2">new_beta </span><span class="s1">= </span><span class="s2">blp_gmm_loss</span><span class="s3">(</span><span class="s2">beta</span><span class="s3">, </span><span class="s2">gamma</span><span class="s3">)</span>
+    <span class="s2">loss</span><span class="s3">.</span><span class="s2">backward</span><span class="s3">()    </span><span class="s0"># Gradient computed.</span>
+
+    <span class="s2">opt_gmm</span><span class="s3">.</span><span class="s2">step</span><span class="s3">()     </span><span class="s0"># Update parameter values using gradient descent.</span>
+
+    <span class="s1">with </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">no_grad</span><span class="s3">()</span><span class="s1">:</span>
+        <span class="s2">gamma</span><span class="s3">[</span><span class="s4">0</span><span class="s3">,</span><span class="s4">1</span><span class="s3">] </span><span class="s1">= </span><span class="s2">gamma</span><span class="s3">[</span><span class="s4">0</span><span class="s3">,</span><span class="s4">1</span><span class="s3">].</span><span class="s2">clamp</span><span class="s3">(</span><span class="s4">0.00</span><span class="s3">, </span><span class="s4">0.00</span><span class="s3">)</span>
+        <span class="s2">beta</span><span class="s3">[</span><span class="s4">1</span><span class="s3">] </span><span class="s1">= </span><span class="s2">beta</span><span class="s3">[</span><span class="s4">1</span><span class="s3">].</span><span class="s2">clamp</span><span class="s3">(</span><span class="s4">0.00</span><span class="s3">, </span><span class="s2">np</span><span class="s3">.</span><span class="s2">inf</span><span class="s3">)</span>
+        <span class="s0"># gamma[0,0] = gamma[0,0].clamp(0.00, np.inf)</span>
+        <span class="s0"># gamma[1,1] = gamma[1,1].clamp(0.00, np.inf)</span>
+
+    <span class="s2">weight_matrix </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">inverse</span><span class="s3">(</span><span class="s4">1</span><span class="s1">/</span><span class="s3">(</span><span class="s2">num_T </span><span class="s1">* </span><span class="s2">num_prod</span><span class="s3">) </span><span class="s1">* </span><span class="s3">(</span><span class="s2">moment_x</span><span class="s3">.</span><span class="s2">T </span><span class="s1">@ </span><span class="s2">moment_x</span><span class="s3">).</span><span class="s2">detach</span><span class="s3">())</span>
+    <span class="s2">beta </span><span class="s1">= </span><span class="s2">new_beta</span><span class="s3">.</span><span class="s2">detach</span><span class="s3">()</span>
+    <span class="s0"># beta = beta2.detach().clone()</span>
+
+    <span class="s0"># if epoch % 10 == 0:</span>
+    <span class="s0">#</span>
+    <span class="s0">#     loss_val = np.squeeze(loss.detach())</span>
+    <span class="s0">#     print('Iteration [{}]: Loss = {:2.4e}'.format(epoch, loss_val))</span>
+
+<span class="s0">#%% 
+</span><span class="s2">gamma</span>
+<span class="s0">#%% 
+</span><span class="s2">beta</span>
+<span class="s0">#%% 
+</span><span class="s2">ω </span><span class="s1">= </span><span class="s2">np</span><span class="s3">.</span><span class="s2">array</span><span class="s3">((</span><span class="s2">gamma </span><span class="s1">@ </span><span class="s2">gamma</span><span class="s3">.</span><span class="s2">T</span><span class="s3">).</span><span class="s2">detach</span><span class="s3">())</span>
+<span class="s2">ω</span>
+<span class="s0">#%% 
+</span><span class="s2">ω</span><span class="s3">[</span><span class="s4">1</span><span class="s3">,</span><span class="s4">0</span><span class="s3">] </span><span class="s1">/ </span><span class="s2">np</span><span class="s3">.</span><span class="s2">sqrt</span><span class="s3">(</span><span class="s2">ω</span><span class="s3">[</span><span class="s4">0</span><span class="s3">,</span><span class="s4">0</span><span class="s3">] </span><span class="s1">* </span><span class="s2">ω</span><span class="s3">[</span><span class="s4">1</span><span class="s3">, </span><span class="s4">1</span><span class="s3">])</span>
+<span class="s0">#%% 
+</span><span class="s2">np</span><span class="s3">.</span><span class="s2">sqrt</span><span class="s3">([</span><span class="s2">ω</span><span class="s3">[</span><span class="s4">0</span><span class="s3">,</span><span class="s4">0</span><span class="s3">] , </span><span class="s2">ω</span><span class="s3">[</span><span class="s4">1</span><span class="s3">,</span><span class="s4">1</span><span class="s3">]])</span>
+<span class="s0">#%% md 
+</span><span class="s2">We find that 
+ 
+$$ 
+    \widehat\boldsymbol{\beta} \; = \; \begin{pmatrix} -4.1649 \\  0.7055 \\ -0.3136 \end{pmatrix}, \qquad \widehat{\boldsymbol{\Gamma}} \; = \; \begin{pmatrix} 0.3397 &amp; 0.0000 \\ 0.1424 &amp; 0.5912\end{pmatrix} 
+$$ 
+</span><span class="s0">#%% 
+</span><span class="s2">beta</span><span class="s3">, </span><span class="s2">gamma </span><span class="s1">= </span><span class="s2">beta</span><span class="s3">.</span><span class="s2">detach</span><span class="s3">(), </span><span class="s2">gamma</span><span class="s3">.</span><span class="s2">detach</span><span class="s3">()</span>
+<span class="s0">#%% md 
+</span><span class="s2">### Part B 
+ 
+To compute market-specific elasticities, we need to first predict individual level market shares for various realizations of $\mathbf{v}_i$ and then average these across all individuals. For each realization of $\mathbf{v}_i$, the predicted market share for product $j$ is given by 
+ 
+$$ 
+s_{ijt} \; = \; \frac{ \exp \left(  \widetilde{\mathbf{x}}_{j t}^{\prime} \boldsymbol{\beta} + \xi_{j t}+\widetilde{\mathbf{x}}_{j t}^{\prime} \boldsymbol{\Gamma} \boldsymbol{v}_{i} \right) }{1 + \sum_{k \in \mathcal{J}_{t}} \exp \left(  \widetilde{\mathbf{x}}_{k t}^{\prime} \boldsymbol{\beta} + \xi_{k t}+\widetilde{\mathbf{x}}_{k t}^{\prime} \boldsymbol{\Gamma} \boldsymbol{v}_{i} \right)} 
+$$ 
+ 
+The individual coefficients are given by 
+ 
+$$ 
+    \widehat{\boldsymbol{\beta}}_i \; = \; \widehat{\boldsymbol{\beta}} + \boldsymbol{\Gamma} \boldsymbol{v_i} 
+$$ 
+ 
+We can put these together to compute the own-price and cross-price elasticities for each market using the following equations: 
+ 
+$$ 
+\varepsilon_{j k, t} \; = \; \frac{\partial \pi_{j, t}}{\partial p_{k, t}} \frac{p_{k, t}}{\pi_{j, t}} \; = \; \begin{cases}-\frac{p_{j, t}}{\pi_{j, t}} \int_{\mathbf{v}_{i}}  \alpha_{i} \pi_{i, j, t}\left(1-\pi_{i, j, t}\right) \text{d} F\left(\mathbf{v}_{i}\right) \quad &amp; \text { if } j=k \\ 
+\frac{p_{k, t}}{\pi_{j, t}} \int_{\mathbf{v}_{i}}   \alpha_{i} \pi_{i, j, t} \pi_{i, k, t} \; \text{d} F\left(\mathbf{v}_{i}\right) \quad &amp; \text { otherwise. }\end{cases} 
+$$ 
+ 
+We again rely on Gauss-Hermite quadratures to evaluate the integrals. 
+</span><span class="s0">#%% 
+</span><span class="s1">def </span><span class="s2">generate_ind_params</span><span class="s3">(</span><span class="s2">b</span><span class="s3">, </span><span class="s2">g</span><span class="s3">)</span><span class="s1">:</span>
+
+    <span class="s0"># Predicts individual market shares and individual price coefficients for each product at every GH node.</span>
+    <span class="s0"># Returns a matrix of size (num_T, num_prod, GHQ_size) and (2, GHQ_size)</span>
+
+    <span class="s2">numer </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">exp</span><span class="s3">(</span><span class="s2">torch</span><span class="s3">.</span><span class="s2">einsum</span><span class="s3">(</span><span class="s5">'tjk,kl-&gt;tjl'</span><span class="s3">, </span><span class="s2">x_mat</span><span class="s3">, </span><span class="s2">b</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">None</span><span class="s3">]) </span><span class="s1">+ </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">einsum</span><span class="s3">(</span><span class="s5">'tjk,kl,lm -&gt; tjm'</span><span class="s3">, </span><span class="s2">x_random_mat</span><span class="s3">, </span><span class="s2">g</span><span class="s3">, </span><span class="s2">ghq_node_mat</span><span class="s3">))</span>
+    <span class="s2">denom </span><span class="s1">= </span><span class="s4">1 </span><span class="s1">+ </span><span class="s2">numer</span><span class="s3">.</span><span class="s2">sum</span><span class="s3">(</span><span class="s2">axis</span><span class="s1">=</span><span class="s4">1</span><span class="s3">)</span>
+
+    <span class="s0"># Compute the share matrix for every value of unobserved individual characteristics.</span>
+    <span class="s2">share_mat </span><span class="s1">= </span><span class="s2">numer</span><span class="s3">.</span><span class="s2">div</span><span class="s3">(</span><span class="s2">denom</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">None</span><span class="s3">])</span>
+
+    <span class="s2">beta_mat </span><span class="s1">= </span><span class="s2">b</span><span class="s3">[</span><span class="s4">1</span><span class="s1">:-</span><span class="s4">1</span><span class="s3">][</span><span class="s1">:</span><span class="s3">, </span><span class="s1">None</span><span class="s3">] </span><span class="s1">+ </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">einsum</span><span class="s3">(</span><span class="s5">'kl,lm -&gt; km'</span><span class="s3">, </span><span class="s2">g</span><span class="s3">, </span><span class="s2">ghq_node_mat</span><span class="s3">)</span>
+
+    <span class="s1">return </span><span class="s2">share_mat</span><span class="s3">, </span><span class="s2">beta_mat</span>
+<span class="s0">#%% 
+</span><span class="s2">data_wide </span><span class="s1">= </span><span class="s2">pd</span><span class="s3">.</span><span class="s2">pivot</span><span class="s3">(</span><span class="s2">data_ex4</span><span class="s3">, </span><span class="s2">values</span><span class="s1">=</span><span class="s5">'p'</span><span class="s3">, </span><span class="s2">index</span><span class="s1">=</span><span class="s5">'market'</span><span class="s3">, </span><span class="s2">columns</span><span class="s1">=</span><span class="s5">'choice'</span><span class="s3">)</span>
+
+<span class="s2">data_wide</span><span class="s3">.</span><span class="s2">rename</span><span class="s3">(</span><span class="s2">columns</span><span class="s1">=</span><span class="s3">{</span><span class="s4">1</span><span class="s1">: </span><span class="s5">&quot;price_1&quot;</span><span class="s3">, </span><span class="s4">2</span><span class="s1">: </span><span class="s5">&quot;price_2&quot;</span><span class="s3">,</span>
+                                      <span class="s4">3</span><span class="s1">: </span><span class="s5">&quot;price_3&quot;</span><span class="s3">, </span><span class="s4">4</span><span class="s1">: </span><span class="s5">&quot;price_4&quot;</span><span class="s3">,</span>
+                                      <span class="s4">5</span><span class="s1">: </span><span class="s5">&quot;price_5&quot;</span><span class="s3">, </span><span class="s4">6</span><span class="s1">: </span><span class="s5">&quot;price_6&quot;</span><span class="s3">}, </span><span class="s2">inplace</span><span class="s1">=True</span><span class="s3">)</span>
+
+<span class="s2">data_ex4 </span><span class="s1">= </span><span class="s2">pd</span><span class="s3">.</span><span class="s2">merge</span><span class="s3">(</span><span class="s2">data_ex4</span><span class="s3">, </span><span class="s2">data_wide</span><span class="s3">, </span><span class="s2">on</span><span class="s1">=</span><span class="s5">'market'</span><span class="s3">)</span>
+<span class="s0">#%% 
+</span><span class="s2">beta</span><span class="s3">[</span><span class="s1">-</span><span class="s4">1</span><span class="s3">] </span><span class="s1">= -</span><span class="s2">beta</span><span class="s3">[</span><span class="s1">-</span><span class="s4">1</span><span class="s3">]</span>
+
+<span class="s2">share_mat</span><span class="s3">, </span><span class="s2">beta_mat </span><span class="s1">= </span><span class="s2">generate_ind_params</span><span class="s3">(</span><span class="s2">beta</span><span class="s3">, </span><span class="s2">gamma</span><span class="s3">)</span>
+
+<span class="s2">own_price_integral </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">einsum</span><span class="s3">(</span><span class="s5">'tjm, tjm, m, m -&gt; tj'</span><span class="s3">, </span><span class="s2">share_mat</span><span class="s3">, </span><span class="s4">1 </span><span class="s1">- </span><span class="s2">share_mat</span><span class="s3">, </span><span class="s2">beta_mat</span><span class="s3">[</span><span class="s4">1</span><span class="s3">,</span><span class="s1">:</span><span class="s3">], </span><span class="s2">ghq</span><span class="s3">.</span><span class="s2">W</span><span class="s3">)</span>
+
+<span class="s2">cross_price_integral </span><span class="s1">= </span><span class="s2">torch</span><span class="s3">.</span><span class="s2">einsum</span><span class="s3">(</span><span class="s5">'tjm, tkm, m, m -&gt; tjk'</span><span class="s3">, </span><span class="s2">share_mat</span><span class="s3">, </span><span class="s2">share_mat</span><span class="s3">, </span><span class="s2">beta_mat</span><span class="s3">[</span><span class="s4">1</span><span class="s3">,</span><span class="s1">:</span><span class="s3">], </span><span class="s2">ghq</span><span class="s3">.</span><span class="s2">W</span><span class="s3">)</span>
+
+<span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'own'</span><span class="s3">] </span><span class="s1">= - </span><span class="s2">own_price_integral</span><span class="s3">.</span><span class="s2">reshape</span><span class="s3">((</span><span class="s2">num_T </span><span class="s1">* </span><span class="s2">num_prod</span><span class="s3">)) </span><span class="s1">* </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'p'</span><span class="s3">] </span><span class="s1">/ </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'shares'</span><span class="s3">]</span>
+
+<span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'cross_1'</span><span class="s3">] </span><span class="s1">= </span><span class="s2">cross_price_integral</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">:</span><span class="s3">, </span><span class="s4">0</span><span class="s3">].</span><span class="s2">reshape</span><span class="s3">((</span><span class="s2">num_T </span><span class="s1">* </span><span class="s2">num_prod</span><span class="s3">)) </span><span class="s1">* </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'price_1'</span><span class="s3">] </span><span class="s1">/ </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'shares'</span><span class="s3">]</span>
+<span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'cross_2'</span><span class="s3">] </span><span class="s1">= </span><span class="s2">cross_price_integral</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">:</span><span class="s3">, </span><span class="s4">1</span><span class="s3">].</span><span class="s2">reshape</span><span class="s3">((</span><span class="s2">num_T </span><span class="s1">* </span><span class="s2">num_prod</span><span class="s3">)) </span><span class="s1">* </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'price_2'</span><span class="s3">] </span><span class="s1">/ </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'shares'</span><span class="s3">]</span>
+<span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'cross_3'</span><span class="s3">] </span><span class="s1">= </span><span class="s2">cross_price_integral</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">:</span><span class="s3">, </span><span class="s4">2</span><span class="s3">].</span><span class="s2">reshape</span><span class="s3">((</span><span class="s2">num_T </span><span class="s1">* </span><span class="s2">num_prod</span><span class="s3">)) </span><span class="s1">* </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'price_3'</span><span class="s3">] </span><span class="s1">/ </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'shares'</span><span class="s3">]</span>
+<span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'cross_4'</span><span class="s3">] </span><span class="s1">= </span><span class="s2">cross_price_integral</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">:</span><span class="s3">, </span><span class="s4">3</span><span class="s3">].</span><span class="s2">reshape</span><span class="s3">((</span><span class="s2">num_T </span><span class="s1">* </span><span class="s2">num_prod</span><span class="s3">)) </span><span class="s1">* </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'price_4'</span><span class="s3">] </span><span class="s1">/ </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'shares'</span><span class="s3">]</span>
+<span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'cross_5'</span><span class="s3">] </span><span class="s1">= </span><span class="s2">cross_price_integral</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">:</span><span class="s3">, </span><span class="s4">4</span><span class="s3">].</span><span class="s2">reshape</span><span class="s3">((</span><span class="s2">num_T </span><span class="s1">* </span><span class="s2">num_prod</span><span class="s3">)) </span><span class="s1">* </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'price_5'</span><span class="s3">] </span><span class="s1">/ </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'shares'</span><span class="s3">]</span>
+<span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'cross_6'</span><span class="s3">] </span><span class="s1">= </span><span class="s2">cross_price_integral</span><span class="s3">[</span><span class="s1">:</span><span class="s3">, </span><span class="s1">:</span><span class="s3">, </span><span class="s4">5</span><span class="s3">].</span><span class="s2">reshape</span><span class="s3">((</span><span class="s2">num_T </span><span class="s1">* </span><span class="s2">num_prod</span><span class="s3">)) </span><span class="s1">* </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'price_6'</span><span class="s3">] </span><span class="s1">/ </span><span class="s2">data_ex4</span><span class="s3">[</span><span class="s5">'shares'</span><span class="s3">]</span>
+<span class="s0">#%% 
+</span><span class="s2">average_elasticity </span><span class="s1">= </span><span class="s2">data_ex4</span><span class="s3">.</span><span class="s2">groupby</span><span class="s3">(</span><span class="s5">'choice'</span><span class="s3">)[[</span><span class="s5">'own'</span><span class="s3">, </span><span class="s5">'cross_1'</span><span class="s3">, </span><span class="s5">'cross_2'</span><span class="s3">, </span><span class="s5">'cross_3'</span><span class="s3">, </span><span class="s5">'cross_4'</span><span class="s3">, </span><span class="s5">'cross_5'</span><span class="s3">, </span><span class="s5">'cross_6'</span><span class="s3">]].</span><span class="s2">mean</span><span class="s3">()</span>
+<span class="s2">e_mat </span><span class="s1">= </span><span class="s2">np</span><span class="s3">.</span><span class="s2">array</span><span class="s3">(</span><span class="s2">average_elasticity</span><span class="s3">[[</span><span class="s5">'cross_1'</span><span class="s3">, </span><span class="s5">'cross_2'</span><span class="s3">, </span><span class="s5">'cross_3'</span><span class="s3">, </span><span class="s5">'cross_4'</span><span class="s3">, </span><span class="s5">'cross_5'</span><span class="s3">, </span><span class="s5">'cross_6'</span><span class="s3">]])</span>
+<span class="s2">np</span><span class="s3">.</span><span class="s2">fill_diagonal</span><span class="s3">(</span><span class="s2">e_mat</span><span class="s3">, </span><span class="s2">np</span><span class="s3">.</span><span class="s2">array</span><span class="s3">(</span><span class="s2">average_elasticity</span><span class="s3">[</span><span class="s5">'own'</span><span class="s3">]))</span>
+<span class="s0">#%% 
+</span><span class="s2">e_mat</span>
+<span class="s0">#%% md 
+</span><span class="s2">We see that own price and cross price elasticities are not driven solely by functional form, but by the heterogeneity in the price 
+sensitivity across consumers who purchase the various products. This creates the difference between the results here and in Exercise 3. The absurdly low elasticities associated with products 1 and 2 could be driven by the extremely low prices for these products across all markets as seen in the table below for Part 3. 
+ 
+$$ 
+    \quad 
+$$ 
+ 
+### Part 3 
+ 
+The difference in prices and market shares could be attributed to certain products having much lower quality on average (especially products 3 and 4) compared to products 5 and 6. The impact of quality on customer preferences might be heterogenous, but the coefficient related to quality is strictly positive with low variance, which implies that customers will tend to shift away from these products in unison. 
+</span><span class="s0">#%% 
+</span><span class="s2">data_ex4</span><span class="s3">.</span><span class="s2">groupby</span><span class="s3">(</span><span class="s5">'choice'</span><span class="s3">)[[</span><span class="s5">'p'</span><span class="s3">, </span><span class="s5">'x'</span><span class="s3">, </span><span class="s5">'shares'</span><span class="s3">]].</span><span class="s2">mean</span><span class="s3">()</span>
+<span class="s0">#%% md 
+</span>
+<span class="s0">#%% 
+</span></pre>
+</body>
+</html>
